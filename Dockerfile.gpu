@@ -1,1 +1,39 @@
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/nightly/cu128
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps (safe baseline; flash-attn may need more depending on wheels/toolchain)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY . /app
+
+RUN python -m pip install --upgrade pip
+
+# Constraints prevent numpy from being upgraded to 2.4.x (breaks many numba builds)
+RUN printf "numpy<2.4\n" > /tmp/constraints.txt
+
+# Install your app deps first if you have a requirements.txt (adjust path/name if needed)
+# (If the repo already installs deps another way, keep that method and just keep the constraints idea.)
+RUN if [ -f requirements.txt ]; then \
+      python -m pip install --no-cache-dir -r requirements.txt -c /tmp/constraints.txt ; \
+    fi
+
+# GPU torch nightly (sm_120) + pinned numpy/numba
+RUN python -m pip install --no-cache-dir --upgrade --force-reinstall --pre \
+      torch torchvision torchaudio \
+      --index-url ${TORCH_INDEX_URL} \
+      --extra-index-url https://pypi.org/simple \
+      -c /tmp/constraints.txt \
+  && python -m pip install --no-cache-dir --upgrade --force-reinstall \
+      "numba==0.64.0rc1" \
+      -c /tmp/constraints.txt
+
+# Optional speed-up (best-effort)
+RUN python -m pip install --no-cache-dir flash-attn || true
+
+CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8880"]
 
